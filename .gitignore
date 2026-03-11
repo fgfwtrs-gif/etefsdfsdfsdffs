@@ -1,0 +1,14 @@
+.env
+bot-data.json
+bot-data.json.tmp
+__pycache__/
+*.pyc
+*.pyo
+*.sqlite
+*.sqlite3
+*.sqlite3-journal
+*.db
+*.log
+tmp-store-test.json
+reports/
+.venv/

@@ -1,0 +1,224 @@
+[bot]
+token = ""
+start_image_path = "assets/start.png"
+timezone = "Asia/Krasnoyarsk"
+
+[branding]
+bot_name = "VPN Халява"
+welcome_title = "🔥 VPN ХАЛЯВА — интернет без блокировок за копейки"
+welcome_text = """Хватит терпеть блокировки и медленный интернет.
+Подключи быстрый VPN за смешные деньги и пользуйся интернетом без ограничений.
+
+🚀 Что ты получаешь:
+• Доступ ко всем сайтам и сервисам
+• Высокую скорость без лагов
+• Полную анонимность и защиту данных
+• Работу на любых устройствах
+
+📱 Поддержка:
+iOS • Android • Windows • Linux • Wi-Fi роутеры
+
+💰 Цены:
+• 1 месяц — 50 ₽
+• 12 месяцев — 500 ₽
+
+⚡️ Подключение за 1–2 минуты
+🔥 Количество доступов ограничено — успей подключиться!"""
+support_text = "🛟 Выберите тему вопроса ниже, затем отправьте сообщение. Администратор ответит прямо в боте."
+support_url = ""
+
+[payments]
+payment_url = "https://finance.ozon.ru/apps/sbp/ozonbankpay/019be733-04db-7cdf-93b6-0b54563d7f74"
+payment_label = "Перейти к оплате"
+currency = "RUB"
+auto_approve_manual_payments = false
+admin_chat_ids = []
+
+[database]
+path = "bot-data.json"
+
+[sales]
+precreate_client_on_order = false
+default_inbound_id = 1
+default_protocol = "vless"
+subscription_url_template = "https://193.124.22.249:2053/sub/{sub_id}"
+traffic_limit_gb = 0
+limit_ip = 2
+reset = 0
+server_address = "vpn.example.com"
+server_port = 443
+public_key = "REPLACE_ME"
+short_id = "REPLACE_ME"
+server_name = "www.cloudflare.com"
+spider_x = "/"
+remark_prefix = "tg"
+
+[xui]
+enabled = false
+base_url = ""
+username = ""
+password = ""
+api_token = ""
+login_path = "/login"
+verify_tls = true
+
+[devices.pc]
+title = "💻 ПК / ноутбук"
+description = "Windows, macOS и Linux"
+
+[devices.ios]
+title = "📱 iPhone / iPad"
+description = "iOS и iPadOS"
+
+[devices.android]
+title = "🤖 Android"
+description = "Смартфоны и планшеты"
+
+[devices.smarttv]
+title = "📺 Smart TV"
+description = "Телевизоры и ТВ-приставки"
+
+[devices.router]
+title = "📡 Роутер"
+description = "Для дома, офиса и всей сети"
+requires_protocol = true
+allowed_protocols = ["vless", "trojan", "shadowsocks", "wireguard"]
+
+[plans.month_1]
+title = "🔥 1 месяц"
+months = 1
+price = 50
+badge = "Самый популярный"
+button_style = "success"
+
+[plans.year_1]
+title = "🎁 12 месяцев"
+months = 12
+price = 500
+badge = "Подарок года"
+button_style = "danger"
+
+[protocols.vless]
+title = "VLESS + Reality"
+description = "Лучший универсальный вариант"
+enabled = true
+inbound_id = 1
+# client_template_json должен соответствовать именно твоему inbound в 3x-ui
+client_template_json = """{
+  "id": {json_client_id},
+  "flow": "xtls-rprx-vision",
+  "email": {json_email},
+  "limitIp": {limit_ip},
+  "totalGB": {total_bytes},
+  "expiryTime": {expiry_time},
+  "enable": {json_enabled},
+  "tgId": {json_tg_id},
+  "subId": {json_sub_id},
+  "comment": {json_comment},
+  "reset": {reset}
+}"""
+access_template = "vless://{client_id}@{server_address}:{server_port}?type=tcp&security=reality&pbk={public_key}&fp=chrome&sni={server_name}&sid={short_id}&spx={spider_x}&flow=xtls-rprx-vision#{remark}"
+
+[protocols.vmess]
+title = "VMess"
+description = "Подходит для части старых клиентов и роутеров"
+enabled = false
+inbound_id = 2
+client_template_json = """{
+  "id": {json_client_id},
+  "alterId": 0,
+  "email": {json_email},
+  "limitIp": {limit_ip},
+  "totalGB": {total_bytes},
+  "expiryTime": {expiry_time},
+  "enable": {json_enabled},
+  "tgId": {json_tg_id},
+  "subId": {json_sub_id},
+  "comment": {json_comment},
+  "reset": {reset}
+}"""
+access_template = "vmess://{vmess_b64}"
+
+[protocols.trojan]
+title = "Trojan + Reality"
+description = "Для роутеров и клиентов с поддержкой Trojan Reality"
+enabled = false
+inbound_id = 0
+# Укажи inbound_id Trojan из 3x-ui и включи enabled = true
+# Если у inbound другой набор полей клиента, подстрой client_template_json под него
+client_template_json = """{
+  "password": {json_password},
+  "email": {json_email},
+  "limitIp": {limit_ip},
+  "totalGB": {total_bytes},
+  "expiryTime": {expiry_time},
+  "enable": {json_enabled},
+  "tgId": {json_tg_id},
+  "subId": {json_sub_id},
+  "comment": {json_comment},
+  "reset": {reset}
+}"""
+access_template = "trojan://{password}@{server_address}:2083?type=tcp&security=reality&sni=www.intel.com&fp=chrome&pbk=REPLACE_ME&sid=89e3&headerType=none#{remark}"
+
+[protocols.shadowsocks]
+title = "Shadowsocks"
+description = "Для роутеров и клиентов с поддержкой Shadowsocks 2022"
+enabled = false
+inbound_id = 0
+# Укажи inbound_id Shadowsocks из 3x-ui и включи enabled = true
+method = "2022-blake3-aes-256-gcm"
+client_template_json = """{
+  "password": {json_password},
+  "method": {json_method},
+  "email": {json_email},
+  "limitIp": {limit_ip},
+  "totalGB": {total_bytes},
+  "expiryTime": {expiry_time},
+  "enable": {json_enabled},
+  "tgId": {json_tg_id},
+  "subId": {json_sub_id},
+  "comment": {json_comment},
+  "reset": {reset}
+}"""
+access_template = "ss://{ss_base64}@{server_address}:8388#{remark}"
+
+[protocols.wireguard]
+title = "WireGuard"
+description = "Для роутеров и клиентов с поддержкой WG"
+enabled = true
+inbound_id = 7
+# Для WireGuard ниже уже подставлены server-side поля как пример.
+# Автосоздание peer в 3x-ui всё ещё требует отдельной поддержки в коде.
+client_template_json = """{
+  "email": {json_email},
+  "limitIp": {limit_ip},
+  "totalGB": {total_bytes},
+  "expiryTime": {expiry_time},
+  "enable": {json_enabled},
+  "tgId": {json_tg_id},
+  "subId": {json_sub_id},
+  "comment": {json_comment},
+  "reset": {reset}
+}"""
+access_template = """[Interface]
+PrivateKey = {client_private_key}
+Address = {client_address}
+DNS = 1.1.1.1, 1.0.0.1
+MTU = 1420
+
+[Peer]
+PublicKey = REPLACE_ME
+Endpoint = 193.124.22.249:54506
+AllowedIPs = 0.0.0.0/0, ::/0"""
+
+[support_topics.subscription]
+title = "📦 Подписка"
+
+[support_topics.connection]
+title = "🛠 Ошибка подключения"
+
+[support_topics.payment]
+title = "💳 Оплата"
+
+[support_topics.other]
+title = "💬 Другое"
