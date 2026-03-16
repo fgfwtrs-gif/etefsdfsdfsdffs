@@ -4,7 +4,10 @@ from dataclasses import dataclass
 import os
 from pathlib import Path
 from typing import Any
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # Python < 3.11
+    import tomli as tomllib
 
 
 @dataclass(slots=True)
@@ -50,6 +53,7 @@ class BotConfig:
     token: str
     start_image_path: str
     timezone: str
+    telegram_proxy_url: str
 
 
 @dataclass(slots=True)
@@ -219,6 +223,7 @@ def load_settings(path: str | Path = "config.toml") -> Settings:
             token=_env_value("BOT_TOKEN", bot.get("token", "")),
             start_image_path=bot.get("start_image_path", ""),
             timezone=bot.get("timezone", "UTC"),
+            telegram_proxy_url=_env_value("TELEGRAM_PROXY_URL", ""),
         ),
         branding=BrandingConfig(
             bot_name=branding["bot_name"],

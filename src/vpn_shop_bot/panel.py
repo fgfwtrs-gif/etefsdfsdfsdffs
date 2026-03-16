@@ -566,11 +566,11 @@ class XuiPanel:
         client_id: str,
     ) -> str:
         _ = telegram_id
-        _ = username
         _ = protocol
         device_alias = self._device_alias(device).lower()
         unique_suffix = client_id.split("-", 1)[0][:6].lower()
-        return f"halyava-{device_alias}-{unique_suffix}"
+        user_alias = f"@{self._sanitize_username(username)}" if username else f"tg_{telegram_id}"
+        return f"{user_alias}|{device_alias}|{unique_suffix}"
 
     @staticmethod
     def _device_alias(device: DeviceConfig) -> str:

@@ -30,6 +30,9 @@ from .store import OrderRecord, PromoGrantRecord, Store, SubscriptionRecord, utc
 
 LOG = logging.getLogger(__name__)
 
+HUB_IOS_URL = "https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532"
+HUB_ANDROID_URL = "https://play.google.com/store/apps/details?id=app.hiddify.com"
+
 BUY_TEXT = "Купить VPN"
 PROFILE_TEXT = "Профиль"
 SUPPORT_TEXT = "Поддержка"
@@ -48,12 +51,13 @@ class Services:
 
 def build_application(settings: Settings | None = None) -> Application:
     settings = settings or load_settings()
+    proxy_url = settings.bot.telegram_proxy_url or None
     request = HTTPXRequest(
         connect_timeout=20.0,
         read_timeout=30.0,
         write_timeout=30.0,
         pool_timeout=10.0,
-        proxy=None,
+        proxy=proxy_url,
         httpx_kwargs={"trust_env": False},
     )
     get_updates_request = HTTPXRequest(
@@ -61,7 +65,7 @@ def build_application(settings: Settings | None = None) -> Application:
         read_timeout=30.0,
         write_timeout=30.0,
         pool_timeout=10.0,
-        proxy=None,
+        proxy=proxy_url,
         httpx_kwargs={"trust_env": False},
     )
     application = (
@@ -166,6 +170,15 @@ async def safe_edit_message_text(query, text: str, **kwargs):
             LOG.warning("Ignored duplicate edit_message_text call: %s", exc)
             return query.message
         raise
+
+
+async def safe_edit_or_reply_text(query, text: str, **kwargs):
+    message = getattr(query, "message", None)
+    if message is not None and getattr(message, "text", None):
+        return await safe_edit_message_text(query, text, **kwargs)
+    if message is not None:
+        return await message.reply_text(text=text, **kwargs)
+    return await query.get_bot().send_message(chat_id=query.from_user.id, text=text, **kwargs)
 
 
 def is_ignorable_telegram_error(error: Exception | None) -> bool:
@@ -413,23 +426,31 @@ async def send_main_menu_photo(
     sender = update.message or (update.callback_query.message if update.callback_query else None)
     if sender is None:
         return
-    if cached_file_id:
-        sent_message = await sender.reply_photo(
-            photo=cached_file_id,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
-            reply_markup=reply_markup,
-        )
+    try:
+        if cached_file_id:
+            sent_message = await sender.reply_photo(
+                photo=cached_file_id,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+            )
+            cache_photo_file_id(context, sent_message)
+            return
+        with svc.settings.start_image_file.open("rb") as image:
+            sent_message = await sender.reply_photo(
+                photo=image,
+                caption=caption,
+                parse_mode=ParseMode.HTML,
+                reply_markup=reply_markup,
+            )
         cache_photo_file_id(context, sent_message)
-        return
-    with svc.settings.start_image_file.open("rb") as image:
-        sent_message = await sender.reply_photo(
-            photo=image,
-            caption=caption,
-            parse_mode=ParseMode.HTML,
+    except (TimedOut, NetworkError) as exc:
+        LOG.warning("Failed to send start image, falling back to text menu: %s", exc)
+        await sender.reply_text(
+            caption,
             reply_markup=reply_markup,
+            parse_mode=ParseMode.HTML,
         )
-    cache_photo_file_id(context, sent_message)
 
 
 def cache_photo_file_id(context: ContextTypes.DEFAULT_TYPE, message) -> None:
@@ -802,7 +823,9 @@ def access_buttons(
     subscription_url: str,
     renew_order_id: int,
 ) -> InlineKeyboardMarkup:
-    rows = [[styled_inline_button(f"Открыть подписку • {device_title}", url=subscription_url)]]
+    rows: list[list[InlineKeyboardButton]] = []
+    if subscription_url:
+        rows.append([styled_inline_button(f"Открыть подписку • {device_title}", url=subscription_url)])
     instruction_url = instruction_url_for_device(svc, device_key)
     if instruction_url:
         rows.append([styled_inline_button("Открыть инструкцию", url=instruction_url)])
@@ -845,6 +868,134 @@ async def send_wireguard_conf_file(
         document=InputFile(payload, filename=filename),
         caption="📄 Конфиг WireGuard в формате .conf",
     )
+
+
+def guide_image_path() -> Path:
+    return Path("assets/guide.png")
+
+
+def should_send_hub_guide(device_key: str) -> bool:
+    return device_key != "router"
+
+
+def render_hub_connection_steps() -> str:
+    return (
+        f"1. Скачайте приложение Hiddify (Hub): <a href=\"{HUB_IOS_URL}\">iOS</a> или <a href=\"{HUB_ANDROID_URL}\">Android</a>\n"
+        "2. Если хотите добавить VPN как подписку с автообновлением, нажмите кнопку <b>«Открыть подписку»</b> ниже\n"
+        "3. Если подключаете вручную, скопируйте конфиг ниже\n"
+        "4. Откройте Hiddify (Hub) и нажмите <b>«Добавить профиль из буфера обмена»</b>\n"
+        "5. Подключайтесь и пользуйтесь VPN"
+    )
+
+
+def render_hub_guide_message(*, order_id: int, device_title: str, ends_at: str, config_text: str, payment_type: str) -> str:
+    title = "✅ <b>Оплата подтверждена</b>" if payment_type == "paid" else "🎁 <b>Бесплатная подписка активирована</b>"
+    return (
+        f"{title}\n\n"
+        f"• <b>Заказ:</b> #{order_id}\n"
+        f"• <b>Устройство:</b> {device_title}\n"
+        f"• <b>Доступ активен до:</b> {format_datetime_human(ends_at)}\n\n"
+        f"{render_hub_connection_steps()}\n\n"
+        f"⚙️ <b>Конфиг для копирования:</b>\n<code>{config_text}</code>"
+    )
+
+
+async def send_guide_photo_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    caption: str,
+    reply_markup: InlineKeyboardMarkup,
+) -> bool:
+    path = guide_image_path()
+    if not path.exists():
+        return False
+    file_id = context.application.bot_data.get("guide_image_file_id")
+    if file_id:
+        sent_message = await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=file_id,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+        cache_guide_file_id(context, sent_message)
+        return True
+    with path.open("rb") as image:
+        sent_message = await context.bot.send_photo(
+            chat_id=chat_id,
+            photo=image,
+            caption=caption,
+            parse_mode=ParseMode.HTML,
+            reply_markup=reply_markup,
+        )
+    cache_guide_file_id(context, sent_message)
+    return True
+
+
+def cache_guide_file_id(context: ContextTypes.DEFAULT_TYPE, message) -> None:
+    if not message or not getattr(message, "photo", None):
+        return
+    context.application.bot_data["guide_image_file_id"] = message.photo[-1].file_id
+
+
+async def send_delivered_access(
+    context: ContextTypes.DEFAULT_TYPE,
+    *,
+    chat_id: int,
+    order_id: int,
+    device: DeviceConfig,
+    protocol: ProtocolConfig,
+    access: ProvisionedAccess,
+    ends_at: str,
+    payment_type: str,
+    renew_order_id: int,
+    username: str | None = None,
+) -> None:
+    svc = services(context)
+    reply_markup = access_buttons(
+        svc,
+        device_key=device.key,
+        device_title=device.title,
+        subscription_url=access.subscription_url,
+        renew_order_id=renew_order_id,
+    )
+    if should_send_hub_guide(device.key) and protocol.key != "wireguard":
+        caption = render_hub_guide_message(
+            order_id=order_id,
+            device_title=device.title,
+            ends_at=ends_at,
+            config_text=access.config_text,
+            payment_type=payment_type,
+        )
+        if await send_guide_photo_message(
+            context,
+            chat_id=chat_id,
+            caption=caption,
+            reply_markup=reply_markup,
+        ):
+            return
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=render_access_message(
+            access,
+            device.title,
+            ends_at,
+            order_id=order_id,
+            payment_type=payment_type,
+        ),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+        reply_markup=reply_markup,
+    )
+    if protocol.key == "wireguard":
+        await send_wireguard_conf_file(
+            context,
+            telegram_id=chat_id,
+            username=username,
+            device_key=device.key,
+            config_text=access.config_text,
+        )
 
 
 async def show_payment_screen(update: Update, context: ContextTypes.DEFAULT_TYPE, order_id: int) -> None:
@@ -1089,33 +1240,18 @@ async def fulfill_order(
         config_text=access.config_text,
         reminder_sent_at=None,
     )
-    await context.bot.send_message(
+    await send_delivered_access(
+        context,
         chat_id=user_id,
-        text=render_access_message(
-            access,
-            device.title,
-            ends_at,
-            order_id=order.id,
-            payment_type=order.payment_type,
-        ),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-        reply_markup=access_buttons(
-            svc,
-            device_key=device.key,
-            device_title=device.title,
-            subscription_url=access.subscription_url,
-            renew_order_id=subscription_order_id,
-        ),
+        order_id=order.id,
+        device=device,
+        protocol=protocol,
+        access=access,
+        ends_at=ends_at,
+        payment_type=order.payment_type,
+        renew_order_id=subscription_order_id,
+        username=user_info.get("username"),
     )
-    if protocol.key == "wireguard":
-        await send_wireguard_conf_file(
-            context,
-            telegram_id=user_id,
-            username=user_info.get("username"),
-            device_key=device.key,
-            config_text=access.config_text,
-        )
 
 
 def render_access_message(
@@ -1132,8 +1268,7 @@ def render_access_message(
         f"• <b>Заказ:</b> #{order_id}\n"
         f"• <b>Устройство:</b> {device_title}\n"
         f"• <b>Доступ активен до:</b> {format_datetime_human(ends_at)}\n\n"
-        "Чтобы добавить VPN как полноценную подписку с автообновлением, используй кнопку <b>Открыть подписку</b> ниже.\n"
-        "Если вставить конфиг вручную, приложение создаст обычный локальный профиль.\n\n"
+        f"{render_hub_connection_steps()}\n\n"
         + (
             "📄 <b>Файл .conf отправлен отдельным сообщением.</b>"
             if access.protocol_key == "wireguard"
@@ -1268,7 +1403,8 @@ async def show_profile_callback(update: Update, context: ContextTypes.DEFAULT_TY
     for item in active[:5]:
         keyboard.append([styled_inline_button(profile_button_title(item), callback_data=f"profile:config:{item.order_id}", style="success")])
     keyboard.append([styled_inline_button("Назад в меню", callback_data="menu:home", style="danger")])
-    await update.callback_query.edit_message_text(
+    await safe_edit_or_reply_text(
+        update.callback_query,
         "\n".join(lines),
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup(keyboard),
@@ -1291,7 +1427,8 @@ async def show_history(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             device = svc.settings.devices[order.device_key]
             lines.append(f"• #{order.id} — <code>{order.order_code}</code> — {device.title} • {plan.title} • {protocol.title} — {order.amount_rub} ₽")
         text = "\n".join(lines)
-    await update.callback_query.edit_message_text(
+    await safe_edit_or_reply_text(
+        update.callback_query,
         text,
         parse_mode=ParseMode.HTML,
         reply_markup=InlineKeyboardMarkup([[styled_inline_button("К профилю", callback_data="profile:back", style="primary")]]),
@@ -1307,11 +1444,45 @@ async def show_saved_config(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         return
     subscription_url = subscription.subscription_url if subscription and subscription.subscription_url else order.subscription_url
     config_text = subscription.config_text if subscription and subscription.config_text else order.config_text
+    protocol = svc.settings.protocols[order.protocol_key]
     title = (
         profile_summary_title(subscription)
         if subscription
         else svc.settings.devices.get(order.device_key, DeviceConfig(order.device_key, order.device_key, "")).title
     )
+    if should_send_hub_guide(order.device_key) and order.protocol_key != "wireguard" and config_text:
+        await send_delivered_access(
+            context,
+            chat_id=order.telegram_id,
+            order_id=order.id,
+            device=svc.settings.devices[order.device_key],
+            protocol=protocol,
+            access=ProvisionedAccess(
+                client_id=order.xui_client_id or "",
+                email=order.xui_email or "",
+                sub_id=order.xui_sub_id or "",
+                inbound_id=order.inbound_id or 0,
+                protocol_key=order.protocol_key,
+                subscription_url=subscription_url or "",
+                config_text=config_text,
+                title=title,
+            ),
+            ends_at=subscription.ends_at if subscription else utc_now(),
+            payment_type=subscription.payment_type if subscription else order.payment_type,
+            renew_order_id=order_id,
+            username=(svc.store.get_user(order.telegram_id) or {}).get("username"),
+        )
+        await safe_edit_message_text(
+            update.callback_query,
+            "✅ Гайд и конфиг отправлены новым сообщением в этот чат.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [styled_inline_button("Продлить подписку", callback_data=f"profile:renew:{order_id}", style="success")],
+                    [styled_inline_button("К профилю", callback_data="profile:back", style="primary")],
+                ]
+            ),
+        )
+        return
     lines = [
         "🔐 <b>Ваш доступ</b>",
         "",
@@ -1324,8 +1495,7 @@ async def show_saved_config(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     lines.extend(
         [
             "",
-            "Для полноценной подписки с автообновлением используй кнопку <b>Открыть подписку</b> ниже.",
-            "Если вставить конфиг вручную, приложение создаст локальный профиль.",
+            render_hub_connection_steps(),
         ]
     )
     if order.protocol_key == "wireguard":
@@ -1380,7 +1550,8 @@ async def begin_renewal(update: Update, context: ContextTypes.DEFAULT_TYPE, orde
         for plan in svc.settings.plans.values()
     ]
     buttons.append([styled_inline_button("К профилю", callback_data="profile:back", style="danger")])
-    await update.callback_query.edit_message_text(
+    await safe_edit_or_reply_text(
+        update.callback_query,
         "♻️ <b>Продление подписки</b>\n\n"
         f"• <b>Подписка:</b> {profile_summary_title(subscription)}\n"
         f"• <b>Осталось:</b> {format_remaining(subscription.ends_at)}\n"
@@ -2158,22 +2329,17 @@ async def replace_subscription_for_admin(update: Update, context: ContextTypes.D
         title=build_subscription_title(device, protocol),
         reminder_sent_at=None,
     )
-    await context.bot.send_message(
+    await send_delivered_access(
+        context,
         chat_id=subscription.telegram_id,
-        text=(
-            "♻️ <b>Ваш конфиг был заменён</b>\n\n"
-            "Срок действия не изменился. Ниже отправлен новый доступ.\n\n"
-            f"⚙️ <b>Новый конфиг:</b>\n<code>{access.config_text}</code>"
-        ),
-        parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
-        reply_markup=access_buttons(
-            svc,
-            device_key=subscription.device_key,
-            device_title=svc.settings.devices[subscription.device_key].title,
-            subscription_url=access.subscription_url,
-            renew_order_id=subscription.order_id,
-        ),
+        order_id=order.id,
+        device=device,
+        protocol=protocol,
+        access=access,
+        ends_at=subscription.ends_at,
+        payment_type=subscription.payment_type,
+        renew_order_id=subscription.order_id,
+        username=user_row.get("username"),
     )
     await update.callback_query.edit_message_text(
         "✅ Конфиг заменён. Пользователю отправлен новый доступ.",
