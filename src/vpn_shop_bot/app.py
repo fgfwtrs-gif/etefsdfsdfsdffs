@@ -1501,7 +1501,11 @@ async def show_saved_config(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     lines.extend(
         [
             "",
-            render_hub_connection_steps(),
+            (
+                "Инструкция и доступ готовы.\n\nНажмите кнопку <b>«Открыть инструкцию»</b> ниже и используйте конфиг из этого сообщения."
+                if order.device_key == "router"
+                else render_app_connection_steps()
+            ),
         ]
     )
     if order.protocol_key == "wireguard":
