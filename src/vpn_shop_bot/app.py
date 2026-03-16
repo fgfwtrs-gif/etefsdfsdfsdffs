@@ -30,8 +30,8 @@ from .store import OrderRecord, PromoGrantRecord, Store, SubscriptionRecord, utc
 
 LOG = logging.getLogger(__name__)
 
-HUB_IOS_URL = "https://apps.apple.com/us/app/hiddify-proxy-vpn/id6596777532"
-HUB_ANDROID_URL = "https://play.google.com/store/apps/details?id=app.hiddify.com"
+HAPP_IOS_URL = "https://apps.apple.com/us/app/happ-proxy-utility/id6504287215"
+HAPP_ANDROID_URL = "https://play.google.com/store/apps/details?id=com.happproxy"
 
 BUY_TEXT = "Купить VPN"
 PROFILE_TEXT = "Профиль"
@@ -824,8 +824,6 @@ def access_buttons(
     renew_order_id: int,
 ) -> InlineKeyboardMarkup:
     rows: list[list[InlineKeyboardButton]] = []
-    if subscription_url:
-        rows.append([styled_inline_button(f"Открыть подписку • {device_title}", url=subscription_url)])
     instruction_url = instruction_url_for_device(svc, device_key)
     if instruction_url:
         rows.append([styled_inline_button("Открыть инструкцию", url=instruction_url)])
@@ -878,13 +876,14 @@ def should_send_hub_guide(device_key: str) -> bool:
     return device_key != "router"
 
 
-def render_hub_connection_steps() -> str:
+def render_app_connection_steps() -> str:
     return (
-        f"1. Скачайте приложение Hiddify (Hub): <a href=\"{HUB_IOS_URL}\">iOS</a> или <a href=\"{HUB_ANDROID_URL}\">Android</a>\n"
-        "2. Если хотите добавить VPN как подписку с автообновлением, нажмите кнопку <b>«Открыть подписку»</b> ниже\n"
-        "3. Если подключаете вручную, скопируйте конфиг ниже\n"
-        "4. Откройте Hiddify (Hub) и нажмите <b>«Добавить профиль из буфера обмена»</b>\n"
-        "5. Подключайтесь и пользуйтесь VPN"
+        f"1. Установите приложение Happ: <a href=\"{HAPP_IOS_URL}\">iPhone / iPad</a> или <a href=\"{HAPP_ANDROID_URL}\">Android</a>\n"
+        "2. Скопируйте конфиг ниже\n"
+        "3. Откройте Happ\n"
+        "4. Нажмите <b>«Добавить профиль из буфера обмена»</b>\n"
+        "5. Подключитесь к VPN\n"
+        "6. Если нужна пошаговая помощь, нажмите кнопку <b>«Открыть инструкцию»</b> ниже"
     )
 
 
@@ -895,7 +894,7 @@ def render_hub_guide_message(*, order_id: int, device_title: str, ends_at: str, 
         f"• <b>Заказ:</b> #{order_id}\n"
         f"• <b>Устройство:</b> {device_title}\n"
         f"• <b>Доступ активен до:</b> {format_datetime_human(ends_at)}\n\n"
-        f"{render_hub_connection_steps()}\n\n"
+        f"{render_app_connection_steps()}\n\n"
         f"⚙️ <b>Конфиг для копирования:</b>\n<code>{config_text}</code>"
     )
 
@@ -979,6 +978,7 @@ async def send_delivered_access(
         chat_id=chat_id,
         text=render_access_message(
             access,
+            device.key,
             device.title,
             ends_at,
             order_id=order_id,
@@ -1256,6 +1256,7 @@ async def fulfill_order(
 
 def render_access_message(
     access: ProvisionedAccess,
+    device_key: str,
     device_title: str,
     ends_at: str,
     *,
@@ -1263,17 +1264,22 @@ def render_access_message(
     payment_type: str = "paid",
 ) -> str:
     title = "✅ <b>Оплата подтверждена</b>" if payment_type == "paid" else "🎁 <b>Бесплатная подписка активирована</b>"
+    body = (
+        "📄 <b>Файл .conf отправлен отдельным сообщением.</b>"
+        if access.protocol_key == "wireguard"
+        else f"⚙️ <b>Конфиг для копирования:</b>\n<code>{access.config_text}</code>"
+    )
+    if device_key == "router":
+        steps = "Инструкция и доступ готовы.\n\nНажмите кнопку <b>«Открыть инструкцию»</b> ниже и используйте конфиг из этого сообщения."
+    else:
+        steps = render_app_connection_steps()
     return (
         f"{title}\n\n"
         f"• <b>Заказ:</b> #{order_id}\n"
         f"• <b>Устройство:</b> {device_title}\n"
         f"• <b>Доступ активен до:</b> {format_datetime_human(ends_at)}\n\n"
-        f"{render_hub_connection_steps()}\n\n"
-        + (
-            "📄 <b>Файл .conf отправлен отдельным сообщением.</b>"
-            if access.protocol_key == "wireguard"
-            else f"⚙️ <b>Конфиг для копирования:</b>\n<code>{access.config_text}</code>"
-        )
+        f"{steps}\n\n"
+        f"{body}"
     )
 
 
@@ -1503,8 +1509,6 @@ async def show_saved_config(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     else:
         lines.extend(["", "⚙️ <b>Конфиг для копирования:</b>", f"<code>{config_text or 'не настроен'}</code>"])
     buttons = []
-    if subscription_url:
-        buttons.append([styled_inline_button("Открыть подписку", url=subscription_url)])
     instruction_url = instruction_url_for_device(svc, order.device_key)
     if instruction_url:
         buttons.append([styled_inline_button("Открыть инструкцию", url=instruction_url)])
